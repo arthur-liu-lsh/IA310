@@ -52,29 +52,44 @@ def wander(x, y, speed, model):
     return new_x, new_y
 
 class  Village(mesa.Model):
-    def  __init__(self,  n_villagers):
+    def  __init__(self,  n_villagers, n_werewolves, n_clerics, n_hunters):
         mesa.Model.__init__(self)
         self.space = mesa.space.ContinuousSpace(600, 600, False)
         self.schedule = RandomActivation(self)
-        for  _  in  range(n_villagers):
-            self.schedule.add(Villager(random.random()  *  600,  random.random()  *  600,  10, random.randint(1,  600), self))
+        for  _  in  range(n_villagers-n_werewolves):
+            self.schedule.add(Villager(random.random()  *  600,  random.random()  *  600,  10, uuid.uuid1(), self))
+        for  _  in  range(n_werewolves):
+            self.schedule.add(Villager(random.random()  *  600,  random.random()  *  600,  10, uuid.uuid1(), self, villager_class="Werewolf"))
+        for  _  in  range(n_clerics):
+            self.schedule.add(Villager(random.random()  *  600,  random.random()  *  600,  10, uuid.uuid1(), self, villager_class="Cleric"))
+        for  _  in  range(n_hunters):
+            self.schedule.add(Villager(random.random()  *  600,  random.random()  *  600,  10, uuid.uuid1(), self, villager_class="Hunter"))
     def step(self):
         self.schedule.step()
-        if self.schedule.steps >= 1000:
+        if self.schedule.steps >= 1000000:
             self.running = False
 
 class Villager(mesa.Agent):
-    def __init__(self, x, y, speed, unique_id: int, model: Village, distance_attack=40, p_attack=0.6):
+    def __init__(self, x, y, speed, unique_id: int, model: Village, distance_attack=40, p_attack=0.6, villager_class = "Villager"):
         super().__init__(unique_id, model)
         self.pos = (x, y)
         self.speed = speed
         self.model = model
         self.distance_attack = distance_attack
         self.p_attack = p_attack
+        self.villager_class = villager_class
+        self.transformed = False
 
     def portrayal_method(self):
-        color = "red"
-        r = 3
+        if self.villager_class == "Werewolf":
+            color = "red"
+        elif self.villager_class == "Cleric":
+            color = "green"
+        elif self.villager_class == "Hunter":
+            color = "black"
+        else:
+            color = "blue"
+        r = 6 if self.transformed else 3
         portrayal = {"Shape": "circle",
                      "Filled": "true",
                      "Layer": 1,
@@ -82,10 +97,35 @@ class Villager(mesa.Agent):
                      "r": r}
         return portrayal
 
+    def find_target(self, agents, villager_class ,distance):
+        targets = []
+        for agent in agents:
+            if agent.villager_class == villager_class and (agent.pos[0]-self.pos[0])**2 + (agent.pos[1]-self.pos[1])**2 <= distance**2:
+                targets.append(agent)
+        return targets
+
     def step(self):
         self.pos = wander(self.pos[0], self.pos[1], self.speed, self.model)
+        if self.villager_class == "Werewolf" and random.random() < 0.1:
+            self.transformed = not self.transformed
+        elif self.villager_class == "Cleric":
+            targets = self.find_target(self.model.schedule.agents, "Werewolf", 30)
+            for target in targets:
+                if not target.transformed:
+                    target.villager_class = "Villager"
+        elif self.villager_class == "Hunter":
+            targets = self.find_target(self.model.schedule.agents, "Werewolf", 40)
+            for target in targets:
+                if target.transformed:
+                    self.model.schedule.remove(target)
+        
+        if self.transformed:
+            targets = self.find_target(self.model.schedule.agents, "Villager", 40)
+            for target in targets:
+                target.villager_class = "Werewolf"
+        
 
 if  __name__  ==  "__main__":
-    server  =  ModularServer(Village, [ContinuousCanvas()],"Village",{"n_villagers":  20})
+    server  =  ModularServer(Village, [ContinuousCanvas()],"Village",{"n_villagers":  20, "n_werewolves": 5, "n_clerics": 1, "n_hunters": 2    })
     server.port = 8521
     server.launch()
