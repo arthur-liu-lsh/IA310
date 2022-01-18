@@ -52,11 +52,12 @@ def wander(x, y, speed, model):
     return new_x, new_y
 
 class  Village(mesa.Model):
-    def  __init__(self,  n_villagers, n_werewolves, n_clerics, n_hunters):
+    def  __init__(self,  n_villagers, n_werewolves, n_clerics, n_hunters, counter):
         mesa.Model.__init__(self)
         self.space = mesa.space.ContinuousSpace(600, 600, False)
         self.schedule = RandomActivation(self)
-        for  _  in  range(n_villagers-n_werewolves):
+        self.graphdata = DataCollector(counter)
+        for  _  in  range(n_villagers):
             self.schedule.add(Villager(random.random()  *  600,  random.random()  *  600,  10, uuid.uuid1(), self))
         for  _  in  range(n_werewolves):
             self.schedule.add(Villager(random.random()  *  600,  random.random()  *  600,  10, uuid.uuid1(), self, villager_class="Werewolf"))
@@ -66,6 +67,7 @@ class  Village(mesa.Model):
             self.schedule.add(Villager(random.random()  *  600,  random.random()  *  600,  10, uuid.uuid1(), self, villager_class="Hunter"))
     def step(self):
         self.schedule.step()
+        self.graphdata.collect(self)
         if self.schedule.steps >= 1000000:
             self.running = False
 
@@ -125,7 +127,33 @@ class Villager(mesa.Agent):
                 target.villager_class = "Werewolf"
         
 
-if  __name__  ==  "__main__":
-    server  =  ModularServer(Village, [ContinuousCanvas()],"Village",{"n_villagers":  20, "n_werewolves": 5, "n_clerics": 1, "n_hunters": 2    })
+def run_single_server():
+    villager_slider = mesa.visualization.ModularVisualization.UserSettableParameter(
+        'slider', "Villagers", 25, 0, 50, 1)
+    werewolf_slider = mesa.visualization.ModularVisualization.UserSettableParameter(
+        'slider', "Werewolves", 5, 0, 50, 1)
+    cleric_slider = mesa.visualization.ModularVisualization.UserSettableParameter(
+        'slider', "Clerics", 1, 0, 5, 1)
+    hunter_slider = mesa.visualization.ModularVisualization.UserSettableParameter(
+        'slider', "Hunters", 1, 0, 50, 1)
+
+    server = ModularServer(Village, [ContinuousCanvas(), ChartModule([{"Label": "Population", "Color": "orange"}, {"Label": "Werewolves", "Color": "red"}, {"Label": "Transformed werewolves", "Color": "purple"}], data_collector_name="graphdata")], "Village", {
+                           "n_villagers":  villager_slider, "n_werewolves": werewolf_slider, "n_clerics": cleric_slider, "n_hunters": hunter_slider, "counter": counter})
     server.port = 8521
     server.launch()
+
+
+def run_batch():
+    batch_dict = {"n_villagers": [50], "n_werewolves": [
+        5], "n_clerics": range(0, 6, 1), "n_hunters": [1]}
+    batch_run = BatchRunner(Village, batch_dict, fixed_parameters={"counter": counter}, model_reporters=counter)
+    batch_run.run_all()
+    return batch_run.get_model_vars_dataframe()
+
+
+if __name__ == "__main__":
+    counter = {"Population": lambda m: len(m.schedule.agents)}
+    counter["Werewolves"] = lambda m: len([agent for agent in m.schedule.agents if agent.villager_class == "Werewolf"])
+    counter["Transformed werewolves"] = lambda m: len([agent for agent in m.schedule.agents if agent.transformed == True])
+
+    print(run_batch())
