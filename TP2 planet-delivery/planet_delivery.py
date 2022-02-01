@@ -30,7 +30,7 @@ WAITING_TIME = 3
 
 class Item:
     @staticmethod
-    def from_json(json_object):  #Désérialisation des items pour le passage par message
+    def from_json(json_object):  # Désérialisation des items pour le passage par message
         return Item(json_object['x'], json_object['y'], json_object['a'], json_object['b'], json_object['c'],
                     json_object['uid'])
 
@@ -82,14 +82,20 @@ class SpaceRoadNetwork(Agent):
             self.initial_graph.add_node(planets[i])
             for j in range(i):
                 if random.random() < ROAD_BRANCHING_FACTOR:
-                    distance = np.linalg.norm([planets[i].x - planets[j].x, planets[i].y - planets[j].y])
-                    self.initial_graph.add_edge(planets[i], planets[j], distance=distance)
+                    distance = np.linalg.norm(
+                        [planets[i].x - planets[j].x, planets[i].y - planets[j].y])
+                    self.initial_graph.add_edge(
+                        planets[i], planets[j], distance=distance)
         # Reconnect graph of the roads between planets
         while len(list(nx.connected_components(self.initial_graph))) != 1:
-            first_element = random.choice(tuple(list(nx.connected_components(self.initial_graph))[0]))
-            second_element = random.choice(tuple(list(nx.connected_components(self.initial_graph))[1]))
-            distance = np.linalg.norm([first_element.x - second_element.x, first_element.y - second_element.y])
-            self.initial_graph.add_edge(first_element, second_element, distance=distance)
+            first_element = random.choice(
+                tuple(list(nx.connected_components(self.initial_graph))[0]))
+            second_element = random.choice(
+                tuple(list(nx.connected_components(self.initial_graph))[1]))
+            distance = np.linalg.norm(
+                [first_element.x - second_element.x, first_element.y - second_element.y])
+            self.initial_graph.add_edge(
+                first_element, second_element, distance=distance)
         for e in self.initial_graph.edges:
             self.current_graph.add_edge(e[0], e[1],
                                         distance=nx.get_edge_attributes(self.initial_graph, 'distance')[(e[0], e[1])])
@@ -97,7 +103,23 @@ class SpaceRoadNetwork(Agent):
             self.speed_modificator[(e[1], e[0])] = 1.0
 
     def step(self):
-        pass
+        for road in self.speed_modificator:
+            if random.random() < PROBA_ISSUE_ROAD:
+                if self.speed_modificator[road] == 0:
+                    if random.random() < 0.5:
+                        self.speed_modificator[road] = 1
+                    else:
+                        self.speed_modificator[road] = 0.5
+                elif self.speed_modificator[road] == 1:
+                    if random.random() < 0.5:
+                        self.speed_modificator[road] = 0
+                    else:
+                        self.speed_modificator[road] = 0.5
+                elif self.speed_modificator[road] == 0.5:
+                    if random.random() < 0.5:
+                        self.speed_modificator[road] = 1
+                    else:
+                        self.speed_modificator[road] = 0.5
 
     def portrayal_method(self):
         portrayals = []
@@ -112,13 +134,15 @@ class SpaceRoadNetwork(Agent):
                              "Layer": 1,
                              "Color": color,
                              "from_x": (tuple(e)[0].x - self.model.space.x_min) /
-                                       (self.model.space.x_max - self.model.space.x_min),
+                                       (self.model.space.x_max -
+                                        self.model.space.x_min),
                              "from_y": (tuple(e)[0].y - self.model.space.y_min) /
-                                       (self.model.space.y_max - self.model.space.y_min),
+                                       (self.model.space.y_max -
+                                        self.model.space.y_min),
                              "to_x": (tuple(e)[1].x - self.model.space.x_min) /
-                                     (self.model.space.x_max - self.model.space.x_min),
+                             (self.model.space.x_max - self.model.space.x_min),
                              "to_y": (tuple(e)[1].y - self.model.space.y_min) /
-                                     (self.model.space.y_max - self.model.space.y_min)
+                             (self.model.space.y_max - self.model.space.y_min)
                              }
                 portrayals.append(portrayal)
         return portrayals
@@ -158,7 +182,8 @@ class AgentCommunicator(spade.agent.Agent):
 class CommunicatingAgent(Agent):
     def __init__(self, unique_id: int, model: Model, name: string):
         super().__init__(unique_id, model)
-        self.communicator = AgentCommunicator(name + "@localhost", "password-" + name)
+        self.communicator = AgentCommunicator(
+            name + "@localhost", "password-" + name)
         self.communicator.start()
 
     def send(self, msg):
@@ -188,7 +213,9 @@ class PlanetManager(CommunicatingAgent):
             cfps = [spade.message.Message(to=str(a.communicator.jid),
                                           sender=str(self.communicator.jid),
                                           body=json.dumps(item.__dict__) + '|' +
-                                               str(self.items_to_ship[item].x) + '|' + str(self.items_to_ship[item].y),
+                                          str(self.items_to_ship[item].x) +
+                                          '|' +
+                                          str(self.items_to_ship[item].y),
                                           thread='CNP-' + str(item),
                                           metadata={"performative": "call_for_proposal",
                                                     "turn": str(self.model.schedule.steps)}) for
@@ -196,13 +223,51 @@ class PlanetManager(CommunicatingAgent):
             for c in cfps:
                 self.send(c)
             self.start_times[item] = self.model.schedule.steps
-            self.proposals[item] = []
+            self.proposals[item.uid] = []
             self.waiting_for_proposal.append(item)
         self.items_to_ship = dict()
-        for i in [item for item in self.waiting_for_proposal if
-                  self.model.schedule.steps - self.start_times[item] >= WAITING_TIME]:
-            self.items_to_ship[i] = random.choice(self.planets)
+
+        self.communicator.mutex.acquire()
+        try:
+            messages = [m for m in self.communicator.msg_box]
+            self.communicator.msg_box = []
+        finally:
+            self.communicator.mutex.release()
+
+        for m in messages:
+            # Extract information from the message
+            item_info, utility = m.body.split('|')
+            item_uid = Item.from_json(json.loads(item_info)).uid
+            if item_uid in [i.uid for i in self.waiting_for_proposal]:
+                # Save the proposal
+                self.proposals[item_uid].append([m.sender, float(utility)])
+                # Delete message
+                messages.remove(m)
+
+        for i in [item for item in self.waiting_for_proposal if self.model.schedule.steps - self.start_times[item] >= WAITING_TIME]:
+
+            if not self.proposals[i.uid]:
+                # No proposals : the item will be shiped later...
+                self.items_to_ship[i] = random.choice(self.planets)
+            else:
+                # Choose the best offer
+                best_s = np.argmax([p[1] for p in self.proposals[i.uid]])
+
+                # Send accept to the best, reject to the other ships
+                for s in range(len(self.proposals[i.uid])):
+                    self.send(spade.message.Message(
+                        to=str(self.proposals[i.uid][s][0]),
+                        sender=str(self.communicator.jid),
+                        body=str(i.uid),
+                        thread='CNP-' + str(i),
+                        metadata={
+                            "performative": "accept_proposal" if s == best_s else "reject_proposal",
+                            "turn": str(self.model.schedule.steps)
+                        }
+                    ))
+
             self.waiting_for_proposal.remove(i)
+            del self.proposals[i.uid]
             del self.start_times[i]
 
     @staticmethod
@@ -231,9 +296,11 @@ class Ship(CommunicatingAgent):
         self.destination = None
         self.potential_destination = None
         self.waypoint = None
-        self.previous_point = [p for p in self.planets if (p.x == self.x and p.y == self.y)][0]
+        self.previous_point = [p for p in self.planets if (
+            p.x == self.x and p.y == self.y)][0]
         self.environment = environment
         self.item = None
+        self.waiting_time = 0
 
     def move_to(self, dest, speed):
         movement = tuple(min(
@@ -272,7 +339,50 @@ class Ship(CommunicatingAgent):
         finally:
             self.communicator.mutex.release()
         for m in messages:
-            print(m)
+            instruction = m.metadata['performative']
+
+            # Ship already has a destination
+            if self.destination:
+                pass
+            # Wait for a planet manager decision
+            elif self.potential_destination:
+
+                if instruction == 'accept_proposal':
+                    # Set new destination
+                    self.destination = self.potential_destination
+                    self.potential_destination = None
+                elif instruction == 'reject_proposal':
+                    # Cancel potential_destination
+                    self.potential_destination = None
+                else:
+                    self.waiting_time += 1
+
+            elif instruction == 'call_for_proposal':
+                # Extract information from the message
+                item_info, target_x, target_y = m.body.split('|')
+                self.item = Item.from_json(json.loads(item_info))
+
+                # Update internal state
+                self.potential_destination = [
+                    p for p in self.planets if
+                    (p.x == float(target_x) and p.y == float(target_y))][0]
+
+                # Send offer
+                self.send(spade.message.Message(
+                    to=str(m.sender),
+                    sender=str(self.communicator.jid),
+                    body=item_info + '|' + str(self.utility(self.item)),
+                    thread=str(m.thread),
+                    metadata={"performative": "proposal",
+                              "turn": str(self.model.schedule.steps)}
+                ))
+            messages.remove(m)
+
+        # Stop proposal if waiting time too high
+        if self.waiting_time > WAITING_TIME:
+            self.potential_destination = None
+            self.destination = None
+            self.waiting_time = 0
 
     def utility(self, item):
         return item.a * self.preference_a + item.b * self.preference_b + item.c * self.preference_c
